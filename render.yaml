@@ -1,15 +1,20 @@
 # Render Blueprint — https://render.com/docs/blueprint-spec
-# Free web service. The PostgreSQL database is external (e.g. a free Neon or Supabase
-# database) because a Render workspace can only hold one free Postgres instance.
-# Paste its connection string as DATABASE_URL when Render asks (or in the Environment tab).
 #
-# To use a Render-managed database instead, add a `databases:` entry and set
-# DATABASE_URL with `fromDatabase` (see DEPLOYMENT.md).
+# Free web service that shares an EXISTING Render Postgres instance (a workspace can
+# hold only one free Postgres). WareTrack keeps all of its tables in its own schema
+# (DATABASE_SCHEMA), so it never touches the other application's data.
+#
+# The database is only *referenced* (fromDatabase), not declared under `databases:`,
+# so this Blueprint never changes that database's configuration.
+# To give WareTrack its own database instead, add a `databases:` entry and point
+# fromDatabase at it (see DEPLOYMENT.md).
 services:
   - type: web
     name: waretrack-3d
     runtime: node
     plan: free
+    # Must match the region of the referenced database (internal connection).
+    region: frankfurt
     buildCommand: npm ci && npm run build
     # Free instances have no pre-deploy step, so migrations and the first-run demo
     # seed run at startup (both are idempotent).
@@ -19,10 +24,12 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
-      # External PostgreSQL connection string, e.g.
-      # postgresql://user:password@host/dbname?sslmode=require
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: remixfox-db
+          property: connectionString
+      - key: DATABASE_SCHEMA
+        value: waretrack
       - key: SESSION_TTL_HOURS
         value: "12"
       - key: NEXT_PUBLIC_DEMO_MODE

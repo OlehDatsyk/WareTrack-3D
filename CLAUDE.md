@@ -58,6 +58,7 @@ tests/unit|integration Vitest
 - **Task lifecycle** goes through `createTask` / `startTask` / `completeTask` / `cancelTask` in `operations.ts`. `completeTask` applies the side effects (move pallet, consume stock for picks, load onto a shipment).
 - **Workflows**: allowed order and shipment transitions are defined in `src/lib/workflows.ts` and enforced in the services.
 - **Document numbers** (TSK-, SO-, SHP-, PAL-) come from Postgres sequences via `nextNumber()`. Never compute max+1.
+- **Database schema:** connection settings come from `src/lib/database-url.ts`. `DATABASE_SCHEMA` isolates every table in its own Postgres schema; production on Render shares `remixfox-db` this way. Never hard-code `public` in raw SQL; use `current_schema()` or unqualified names.
 - Inside interactive transactions, run queries **sequentially** (no `Promise.all` on `tx`).
 
 ### 3D scene (`src/components/three`)

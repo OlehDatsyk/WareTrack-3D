@@ -1,14 +1,11 @@
 import "server-only";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
+import { runtimeDatabaseConfig } from "@/lib/database-url";
 
 function createClient() {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is not configured. Copy .env.example to .env and set it.");
-  }
-  const adapter = new PrismaPg({ connectionString });
-  return new PrismaClient({ adapter });
+  const config = runtimeDatabaseConfig();
+  return new PrismaClient({ adapter: new PrismaPg(config.pool, config.adapter) });
 }
 
 type GlobalWithPrisma = typeof globalThis & { __waretrackPrisma?: PrismaClient };

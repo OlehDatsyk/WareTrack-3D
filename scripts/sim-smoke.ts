@@ -1,9 +1,10 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
+import { runtimeDatabaseConfig } from "../src/lib/database-url";
 import { runTick } from "../src/server/simulation/engine";
 
-const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
+const prisma = new PrismaClient({ adapter: new PrismaPg(runtimeDatabaseConfig().pool, runtimeDatabaseConfig().adapter) });
 async function main() {
   const wh = await prisma.warehouse.findFirstOrThrow({ where: { code: process.argv[2] ?? "WH-01" } });
   const ticks = Number(process.argv[3] ?? 10);

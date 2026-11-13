@@ -1,12 +1,13 @@
 import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
+import { runtimeDatabaseConfig } from "../src/lib/database-url";
 import { seedDatabase } from "../src/server/seed";
 
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not set");
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
+  const prisma = new PrismaClient({ adapter: new PrismaPg(runtimeDatabaseConfig().pool, runtimeDatabaseConfig().adapter) });
   const started = Date.now();
   try {
     await seedDatabase(prisma, {

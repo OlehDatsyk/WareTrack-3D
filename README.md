@@ -115,6 +115,7 @@ Sign in with one of the demo accounts. The password is the `SEED_DEMO_PASSWORD` 
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_SCHEMA` | Optional Postgres schema for all tables (for shared databases) |
 | `TEST_DATABASE_URL` | Separate database for the test suite (**wiped by tests**) |
 | `SESSION_TTL_HOURS` | Session lifetime (default 12) |
 | `NEXT_PUBLIC_DEMO_MODE` | Shows the demo-account helper on the sign-in page |
