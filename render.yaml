@@ -1,13 +1,10 @@
 # Render Blueprint — https://render.com/docs/blueprint-spec
-# Free tier: a free PostgreSQL database and a free web service.
-# Free web services sleep after inactivity (first request wakes them, ~1 min) and
-# free databases expire after 30 days — upgrade the plans below for production use.
-databases:
-  - name: waretrack-db
-    databaseName: waretrack
-    user: waretrack
-    plan: free
-
+# Free web service. The PostgreSQL database is external (e.g. a free Neon or Supabase
+# database) because a Render workspace can only hold one free Postgres instance.
+# Paste its connection string as DATABASE_URL when Render asks (or in the Environment tab).
+#
+# To use a Render-managed database instead, add a `databases:` entry and set
+# DATABASE_URL with `fromDatabase` (see DEPLOYMENT.md).
 services:
   - type: web
     name: waretrack-3d
@@ -22,10 +19,10 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      # External PostgreSQL connection string, e.g.
+      # postgresql://user:password@host/dbname?sslmode=require
       - key: DATABASE_URL
-        fromDatabase:
-          name: waretrack-db
-          property: connectionString
+        sync: false
       - key: SESSION_TTL_HOURS
         value: "12"
       - key: NEXT_PUBLIC_DEMO_MODE
