@@ -2,6 +2,8 @@
 
 **Interactive 3D warehouse management and logistics simulation platform.**
 
+**Live demo:** [waretrack-3d.onrender.com](https://waretrack-3d.onrender.com) (hosted on Render's free tier, so the first visit after it has been idle can take up to a minute to wake up)
+
 WareTrack 3D combines a professional warehouse management system (inventory, orders, shipments, fleet, workforce, zones, analytics) with a live, isometric 3D model of the warehouse. You inspect and operate the site from the 3D view: click a pallet to move it, assign a forklift to a task, dock a truck, or close a zone. Every action is a real, validated, audited database change.
 
 A deterministic demo simulation keeps the warehouse alive. Forklifts put away inbound pallets, trucks dock, load and depart, and orders flow from release to delivery. Everything the simulation creates is labelled **SIM**, so simulated activity is never confused with work done by real users.
