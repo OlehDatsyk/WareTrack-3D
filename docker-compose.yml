@@ -1,4 +1,5 @@
 # Local development services. Start with: docker compose up -d
+name: waretrack
 services:
   postgres:
     image: postgres:17-alpine
