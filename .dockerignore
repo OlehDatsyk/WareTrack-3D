@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.env
+.env.*
+!.env.example
+coverage
+src/generated
+*.tsbuildinfo
+npm-debug.log*
+docker-compose.yml
+tests

@@ -1,0 +1,819 @@
+// WareTrack 3D — relational data model
+// Layout coordinates (posX/posZ, x/z/width/depth) are in metres, y-up, origin at the
+// centre of the main warehouse building. The 3D scene is rendered from this data.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Identity & access ─────────────────────────────
+
+enum Role {
+  ADMIN
+  MANAGER
+  OPERATOR
+  VIEWER
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  name               String
+  passwordHash       String
+  role               Role      @default(VIEWER)
+  title              String?
+  isActive           Boolean   @default(true)
+  defaultWarehouseId String?
+  preferences        Json      @default("{}")
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  defaultWarehouse  Warehouse?         @relation(fields: [defaultWarehouseId], references: [id], onDelete: SetNull)
+  sessions          Session[]
+  auditLogs         AuditLog[]
+  notificationReads NotificationRead[]
+  stockMovements    StockMovement[]
+  employee          Employee?
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String?
+  details    Json     @default("{}")
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([userId])
+}
+
+// ───────────────────────────── Facility layout ─────────────────────────────
+
+model Warehouse {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  address       String
+  city          String
+  country       String   @default("USA")
+  timezone      String   @default("America/New_York")
+  // Footprint of the main building, used by the 3D scene
+  buildingWidth Float    @default(80)
+  buildingDepth Float    @default(44)
+  isActive      Boolean  @default(true)
+  settings      Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  zones          Zone[]
+  racks          Rack[]
+  locations      StorageLocation[]
+  docks          Dock[]
+  inventory      InventoryItem[]
+  pallets        Pallet[]
+  stockMovements StockMovement[]
+  orders         Order[]
+  shipments      Shipment[]
+  vehicles       Vehicle[]
+  employees      Employee[]
+  tasks          Task[]
+  notifications  Notification[]
+  activities     ActivityEvent[]
+  metrics        MetricSnapshot[]
+  simulation     SimulationState?
+  defaultForUser User[]
+}
+
+enum ZoneType {
+  RECEIVING
+  STORAGE
+  PICKING
+  PACKING
+  DISPATCH
+  RETURNS
+  DAMAGED
+  YARD
+}
+
+enum ZoneStatus {
+  ACTIVE
+  RESTRICTED
+  MAINTENANCE
+  CLOSED
+}
+
+model Zone {
+  id           String     @id @default(cuid())
+  warehouseId  String
+  code         String
+  name         String
+  type         ZoneType
+  status       ZoneStatus @default(ACTIVE)
+  temperatureC Float?
+  color        String     @default("#2563EB")
+  indoor       Boolean    @default(true)
+  // Rectangle on the ground plane (centre x/z, width along x, depth along z)
+  x            Float
+  z            Float
+  width        Float
+  depth        Float
+  notes        String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  warehouse     Warehouse         @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  racks         Rack[]
+  locations     StorageLocation[]
+  inventory     InventoryItem[]
+  movementsFrom StockMovement[]   @relation("MovementFromZone")
+  movementsTo   StockMovement[]   @relation("MovementToZone")
+  employees     Employee[]
+
+  @@unique([warehouseId, code])
+  @@index([warehouseId, type])
+}
+
+enum RackKind {
+  PALLET_RACK
+  SHELVING
+}
+
+model Rack {
+  id          String   @id @default(cuid())
+  warehouseId String
+  zoneId      String
+  code        String
+  kind        RackKind @default(PALLET_RACK)
+  levels      Int
+  columns     Int
+  // Centre of the rack footprint and its rotation around Y (radians)
+  posX        Float
+  posZ        Float
+  rotation    Float    @default(0)
+  length      Float
+  depth       Float
+  levelHeight Float
+  // Side of the rack that faces the access aisle: 1 = +z, -1 = -z (in rack space)
+  aisleSide   Int      @default(1)
+  createdAt   DateTime @default(now())
+
+  warehouse Warehouse         @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  zone      Zone              @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  locations StorageLocation[]
+
+  @@unique([warehouseId, code])
+  @@index([zoneId])
+}
+
+enum LocationType {
+  RACK
+  SHELF
+  FLOOR
+}
+
+model StorageLocation {
+  id          String       @id @default(cuid())
+  warehouseId String
+  zoneId      String
+  rackId      String?
+  code        String
+  type        LocationType
+  level       Int          @default(0)
+  column      Int          @default(0)
+  posX        Float
+  posY        Float        @default(0)
+  posZ        Float
+  maxWeightKg Float        @default(1200)
+  isBlocked   Boolean      @default(false)
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  zone      Zone      @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  rack      Rack?     @relation(fields: [rackId], references: [id], onDelete: Cascade)
+  pallet    Pallet?
+  tasksFrom Task[]    @relation("TaskFromLocation")
+  tasksTo   Task[]    @relation("TaskToLocation")
+
+  @@unique([warehouseId, code])
+  @@index([zoneId])
+  @@index([rackId])
+}
+
+enum DockDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum DockStatus {
+  AVAILABLE
+  OCCUPIED
+  MAINTENANCE
+}
+
+model Dock {
+  id          String        @id @default(cuid())
+  warehouseId String
+  code        String
+  name        String
+  direction   DockDirection
+  status      DockStatus    @default(AVAILABLE)
+  posX        Float
+  posZ        Float
+  rotation    Float         @default(0)
+
+  warehouse Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  shipments Shipment[]
+
+  @@unique([warehouseId, code])
+}
+
+// ───────────────────────────── Catalogue & stock ─────────────────────────────
+
+model Supplier {
+  id           String    @id @default(cuid())
+  name         String    @unique
+  contactName  String?
+  contactEmail String?
+  phone        String?
+  country      String?
+  leadTimeDays Int       @default(7)
+  products     Product[]
+}
+
+model Product {
+  id           String   @id @default(cuid())
+  sku          String   @unique
+  barcode      String?  @unique
+  name         String
+  description  String?
+  category     String
+  unit         String   @default("ea")
+  unitWeightKg Float    @default(1)
+  unitCost     Decimal  @default(0) @db.Decimal(12, 2)
+  reorderLevel Int      @default(50)
+  reorderQty   Int      @default(200)
+  supplierId   String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  supplier   Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  inventory  InventoryItem[]
+  pallets    Pallet[]
+  movements  StockMovement[]
+  orderItems OrderItem[]
+
+  @@index([category])
+  @@index([name])
+}
+
+// Stock of one product in one zone.
+// quantity = good units on hand (includes reserved); available = quantity - reserved.
+// damaged units are tracked separately and are not part of quantity.
+model InventoryItem {
+  id          String    @id @default(cuid())
+  warehouseId String
+  zoneId      String
+  productId   String
+  quantity    Int       @default(0)
+  reserved    Int       @default(0)
+  damaged     Int       @default(0)
+  lastCountAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  zone      Zone      @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([zoneId, productId])
+  @@index([warehouseId, productId])
+}
+
+enum PalletStatus {
+  RECEIVED
+  STORED
+  STAGED
+  IN_TRANSIT
+  LOADED
+  DAMAGED
+}
+
+model Pallet {
+  id            String       @id @default(cuid())
+  code          String       @unique
+  warehouseId   String
+  productId     String
+  locationId    String?      @unique
+  quantity      Int
+  lot           String?
+  status        PalletStatus @default(STORED)
+  grossWeightKg Float        @default(0)
+  receivedAt    DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  warehouse Warehouse        @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  product   Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location  StorageLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  tasks     Task[]
+  movements StockMovement[]
+
+  @@index([warehouseId, status])
+  @@index([productId])
+}
+
+enum MovementType {
+  RECEIPT
+  PUTAWAY
+  TRANSFER
+  PICK
+  ADJUSTMENT
+  DAMAGE
+  RETURN
+  DISPATCH
+}
+
+model StockMovement {
+  id          String       @id @default(cuid())
+  warehouseId String
+  productId   String
+  palletId    String?
+  type        MovementType
+  quantity    Int
+  fromZoneId  String?
+  toZoneId    String?
+  reference   String?
+  note        String?
+  userId      String?
+  simulated   Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  pallet    Pallet?   @relation(fields: [palletId], references: [id], onDelete: SetNull)
+  fromZone  Zone?     @relation("MovementFromZone", fields: [fromZoneId], references: [id], onDelete: SetNull)
+  toZone    Zone?     @relation("MovementToZone", fields: [toZoneId], references: [id], onDelete: SetNull)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([warehouseId, createdAt])
+  @@index([productId, createdAt])
+}
+
+// ───────────────────────────── Orders ─────────────────────────────
+
+model Customer {
+  id      String  @id @default(cuid())
+  name    String  @unique
+  email   String?
+  city    String?
+  country String  @default("USA")
+  orders  Order[]
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  PICKING
+  PACKING
+  READY_FOR_DISPATCH
+  DISPATCHED
+  DELIVERED
+  CANCELLED
+}
+
+model Order {
+  id                 String      @id @default(cuid())
+  number             String      @unique
+  warehouseId        String
+  customerId         String
+  shipmentId         String?
+  priority           Priority    @default(NORMAL)
+  status             OrderStatus @default(PENDING)
+  requiredDispatchAt DateTime
+  notes              String?
+  simulated          Boolean     @default(false)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  dispatchedAt       DateTime?
+
+  warehouse Warehouse   @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  customer  Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  shipment  Shipment?   @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+  items     OrderItem[]
+  tasks     Task[]
+
+  @@index([warehouseId, status])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id        String @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int
+  pickedQty Int    @default(0)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, productId])
+}
+
+// ───────────────────────────── Shipments & fleet ─────────────────────────────
+
+enum ShipmentDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum ShipmentStatus {
+  PLANNED
+  AT_DOCK
+  LOADING
+  READY
+  IN_TRANSIT
+  DELAYED
+  DELIVERED
+  CANCELLED
+}
+
+model Shipment {
+  id              String            @id @default(cuid())
+  trackingNumber  String            @unique
+  warehouseId     String
+  direction       ShipmentDirection @default(OUTBOUND)
+  status          ShipmentStatus    @default(PLANNED)
+  carrier         String
+  origin          String
+  destination     String
+  // Schematic map coordinates (0..1) of the far end of the route — not GPS
+  destMapX        Float             @default(0.5)
+  destMapY        Float             @default(0.5)
+  routeProgress   Float             @default(0)
+  loadingProgress Int               @default(0)
+  weightKg        Float             @default(0)
+  palletCount     Int               @default(0)
+  vehicleId       String?
+  driverId        String?
+  dockId          String?
+  scheduledAt     DateTime
+  eta             DateTime
+  departedAt      DateTime?
+  deliveredAt     DateTime?
+  simulated       Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  warehouse Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  vehicle   Vehicle?        @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  driver    Employee?       @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  dock      Dock?           @relation(fields: [dockId], references: [id], onDelete: SetNull)
+  orders    Order[]
+  events    ShipmentEvent[]
+  tasks     Task[]
+
+  @@index([warehouseId, status])
+  @@index([vehicleId])
+}
+
+model ShipmentEvent {
+  id         String         @id @default(cuid())
+  shipmentId String
+  status     ShipmentStatus
+  message    String
+  location   String?
+  simulated  Boolean        @default(false)
+  createdAt  DateTime       @default(now())
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, createdAt])
+}
+
+enum VehicleType {
+  FORKLIFT
+  REACH_TRUCK
+  PALLET_JACK
+  TRUCK
+  VAN
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  IN_USE
+  CHARGING
+  MAINTENANCE
+  OUT_OF_SERVICE
+}
+
+enum EnergyType {
+  ELECTRIC
+  DIESEL
+}
+
+model Vehicle {
+  id             String        @id @default(cuid())
+  code           String        @unique
+  type           VehicleType
+  model          String
+  registration   String?
+  carrier        String?
+  status         VehicleStatus @default(AVAILABLE)
+  energyType     EnergyType    @default(ELECTRIC)
+  energyLevel    Int           @default(100)
+  warehouseId    String
+  operatorId     String?       @unique
+  onSite         Boolean       @default(true)
+  locationLabel  String        @default("Charging bay")
+  posX           Float         @default(0)
+  posZ           Float         @default(0)
+  heading        Float         @default(0)
+  hoursUsed      Int           @default(0)
+  lastServiceAt  DateTime?
+  nextServiceDue DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  warehouse   Warehouse           @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  operator    Employee?           @relation("VehicleOperator", fields: [operatorId], references: [id], onDelete: SetNull)
+  shipments   Shipment[]
+  tasks       Task[]
+  maintenance MaintenanceRecord[]
+
+  @@index([warehouseId, type])
+}
+
+enum MaintenanceStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+}
+
+model MaintenanceRecord {
+  id          String            @id @default(cuid())
+  vehicleId   String
+  type        String
+  description String
+  cost        Decimal           @default(0) @db.Decimal(10, 2)
+  status      MaintenanceStatus @default(COMPLETED)
+  performedBy String?
+  performedAt DateTime          @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, performedAt])
+}
+
+// ───────────────────────────── Workforce & tasks ─────────────────────────────
+
+enum EmployeeRole {
+  SUPERVISOR
+  FORKLIFT_OPERATOR
+  PICKER
+  PACKER
+  LOADER
+  DRIVER
+  INVENTORY_CLERK
+}
+
+enum Shift {
+  MORNING
+  AFTERNOON
+  NIGHT
+}
+
+enum EmployeeStatus {
+  ON_SHIFT
+  ON_BREAK
+  OFF_SHIFT
+  ON_LEAVE
+}
+
+model Employee {
+  id             String         @id @default(cuid())
+  employeeCode   String         @unique
+  firstName      String
+  lastName       String
+  email          String         @unique
+  phone          String?
+  role           EmployeeRole
+  shift          Shift
+  status         EmployeeStatus @default(OFF_SHIFT)
+  warehouseId    String
+  zoneId         String?
+  userId         String?        @unique
+  hireDate       DateTime
+  tasksCompleted Int            @default(0)
+  unitsPerHour   Float          @default(0)
+  accuracyRate   Float          @default(99)
+  certifications String[]       @default([])
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  warehouse Warehouse  @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  zone      Zone?      @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  user      User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  vehicle   Vehicle?   @relation("VehicleOperator")
+  tasks     Task[]
+  shipments Shipment[]
+
+  @@index([warehouseId, status])
+}
+
+enum TaskType {
+  PUTAWAY
+  PICK
+  REPLENISH
+  TRANSFER
+  LOAD
+  UNLOAD
+  CYCLE_COUNT
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model Task {
+  id             String     @id @default(cuid())
+  number         String     @unique
+  warehouseId    String
+  type           TaskType
+  status         TaskStatus @default(PENDING)
+  priority       Priority   @default(NORMAL)
+  description    String
+  progress       Int        @default(0)
+  assigneeId     String?
+  vehicleId      String?
+  palletId       String?
+  fromLocationId String?
+  toLocationId   String?
+  orderId        String?
+  shipmentId     String?
+  simulated      Boolean    @default(false)
+  dueAt          DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  warehouse    Warehouse        @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  assignee     Employee?        @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+  vehicle      Vehicle?         @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  pallet       Pallet?          @relation(fields: [palletId], references: [id], onDelete: SetNull)
+  fromLocation StorageLocation? @relation("TaskFromLocation", fields: [fromLocationId], references: [id], onDelete: SetNull)
+  toLocation   StorageLocation? @relation("TaskToLocation", fields: [toLocationId], references: [id], onDelete: SetNull)
+  order        Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  shipment     Shipment?        @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+
+  @@index([warehouseId, status])
+  @@index([vehicleId, status])
+  @@index([assigneeId, status])
+}
+
+// ───────────────────────────── Notifications, activity, analytics ─────────────────────────────
+
+enum NotificationCategory {
+  INVENTORY
+  ORDER
+  SHIPMENT
+  FLEET
+  CAPACITY
+  WORKFORCE
+  SYSTEM
+}
+
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// Warehouse-wide notification; read state is tracked per user in NotificationRead.
+model Notification {
+  id          String               @id @default(cuid())
+  warehouseId String
+  category    NotificationCategory
+  priority    NotificationPriority @default(MEDIUM)
+  title       String
+  message     String
+  link        String?
+  entityType  String?
+  entityId    String?
+  // Deduplication key so recurring conditions (e.g. low stock) don't spam
+  dedupeKey   String?
+  simulated   Boolean              @default(false)
+  createdAt   DateTime             @default(now())
+
+  warehouse Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  reads     NotificationRead[]
+
+  @@unique([warehouseId, dedupeKey])
+  @@index([warehouseId, createdAt])
+}
+
+model NotificationRead {
+  notificationId String
+  userId         String
+  readAt         DateTime @default(now())
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([notificationId, userId])
+  @@index([userId])
+}
+
+// Human-readable operational feed shown on the dashboard and in the 3D view.
+model ActivityEvent {
+  id          String   @id @default(cuid())
+  warehouseId String
+  type        String
+  message     String
+  entityType  String?
+  entityId    String?
+  actorName   String?
+  simulated   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@index([warehouseId, createdAt])
+}
+
+// Daily operational metrics. Historical rows are seeded demo data (simulated = true).
+model MetricSnapshot {
+  id                String   @id @default(cuid())
+  warehouseId       String
+  date              DateTime @db.Date
+  ordersReceived    Int
+  ordersShipped     Int
+  unitsPicked       Int
+  unitsReceived     Int
+  pickAccuracy      Float
+  utilization       Float
+  onTimeRate        Float
+  inventoryValue    Float
+  operatingCost     Float
+  laborHours        Float
+  avgDockMinutes    Float
+  inventoryTurnover Float
+  unitsOnHand       Int      @default(0)
+  ordersBacklog     Int      @default(0)
+  trucksOnSite      Int      @default(0)
+  activeOperations  Int      @default(0)
+  inventoryAccuracy Float    @default(99.4)
+  simulated         Boolean  @default(true)
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([warehouseId, date])
+}
+
+model SimulationState {
+  id          String   @id @default(cuid())
+  warehouseId String   @unique
+  running     Boolean  @default(true)
+  tick        Int      @default(0)
+  seed        Int      @default(20261113)
+  intervalMs  Int      @default(4000)
+  lastTickAt  DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+}

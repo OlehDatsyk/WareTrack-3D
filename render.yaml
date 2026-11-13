@@ -1,0 +1,38 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Free tier: a free PostgreSQL database and a free web service.
+# Free web services sleep after inactivity (first request wakes them, ~1 min) and
+# free databases expire after 30 days — upgrade the plans below for production use.
+databases:
+  - name: waretrack-db
+    databaseName: waretrack
+    user: waretrack
+    plan: free
+
+services:
+  - type: web
+    name: waretrack-3d
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    # Free instances have no pre-deploy step, so migrations and the first-run demo
+    # seed run at startup (both are idempotent).
+    startCommand: npx prisma migrate deploy && npm run db:seed-if-empty && npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: waretrack-db
+          property: connectionString
+      - key: SESSION_TTL_HOURS
+        value: "12"
+      - key: NEXT_PUBLIC_DEMO_MODE
+        value: "true"
+      - key: SEED_DEMO_DATA
+        value: "true"
+      # Password for the seeded demo accounts — Render generates a random value.
+      # Read it in the dashboard (Environment tab) to sign in for the first time.
+      - key: SEED_DEMO_PASSWORD
+        generateValue: true

@@ -1,0 +1,23 @@
+# Local development services. Start with: docker compose up -d
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: waretrack-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: waretrack
+      POSTGRES_PASSWORD: waretrack_dev_password
+      POSTGRES_DB: waretrack
+    ports:
+      - "5433:5432"
+    volumes:
+      - waretrack-pgdata:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U waretrack -d waretrack"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  waretrack-pgdata:
